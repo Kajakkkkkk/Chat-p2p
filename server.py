@@ -1,6 +1,6 @@
 from stem.control import Controller
 from cryptography.fernet import Fernet
-from tkinter import scrolledtext, font
+from tkinter import scrolledtext, font, messagebox
 import tkinter as tk
 import socket
 import base64
@@ -12,47 +12,57 @@ cipher_suite = None
 
 def send_response():
     global conn, cipher_suite
-    response_message = response_entry.get()
-    encrypted_response = cipher_suite.encrypt(response_message.encode())
-    conn.send(encrypted_response)
+    if conn and cipher_suite:
+        response_message = response_entry.get()
+        encrypted_response = cipher_suite.encrypt(response_message.encode())
+        try:
+            conn.send(encrypted_response)
+            response_entry.delete(0, tk.END)
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Błąd wysyłania odpowiedzi: {str(e)}")
 
 
 def start_server(address_entry, key_entry, received_messages_text):
     global conn, cipher_suite
 
-    with Controller.from_port(port=9051) as controller:
-        controller.authenticate()
-        response = controller.create_ephemeral_hidden_service({80: 5000}, await_publication=True)
+    try:
+        with Controller.from_port(port=9051) as controller:
+            controller.authenticate()
+            response = controller.create_ephemeral_hidden_service({80: 5000}, await_publication=True)
 
-        address_entry.delete(0, tk.END)
-        address_entry.insert(0, response.service_id + ".onion")
-        print("Adres:", response.service_id + ".onion")
+            address_entry.delete(0, tk.END)
+            address_entry.insert(0, response.service_id + ".onion")
 
-        key = Fernet.generate_key()
-        cipher_suite = Fernet(key)
+            key = Fernet.generate_key()
+            cipher_suite = Fernet(key)
 
-        key_entry.delete(0, tk.END)
-        key_entry.insert(0, base64.urlsafe_b64encode(key).decode())
-        print("Klucz szyfrowania (base64):", base64.urlsafe_b64encode(key).decode())
+            key_entry.delete(0, tk.END)
+            key_entry.insert(0, base64.urlsafe_b64encode(key).decode())
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('localhost', 5000))
-        s.listen(1)
-        conn, addr = s.accept()
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(('localhost', 5000))
+            s.listen(1)
 
+            while True:
+                conn, addr = s.accept()
+                threading.Thread(target=handle_client, args=(conn, received_messages_text)).start()
+    except Exception as e:
+        messagebox.showerror("Błąd", f"Błąd serwera: {str(e)}")
+
+
+def handle_client(conn, received_messages_text):
+    global cipher_suite
+    try:
         while True:
-            try:
-                data = conn.recv(1024)
-                if not data:
-                    break
-                received_message = cipher_suite.decrypt(data).decode()
-                received_messages_text.insert(tk.END, "Odebrano: " + received_message + "\n")
-            except Exception as e:
-                print("Wystąpił błąd:", e)
+            data = conn.recv(1024)
+            if not data:
                 break
-
+            received_message = cipher_suite.decrypt(data).decode()
+            received_messages_text.insert(tk.END, "Odebrano: " + received_message + "\n")
+    except Exception as e:
+        received_messages_text.insert(tk.END, f"Błąd odbioru wiadomości: {str(e)}\n")
+    finally:
         conn.close()
-        s.close()
 
 
 # GUI
@@ -71,26 +81,16 @@ top_frame.pack(fill=tk.X)
 address_label = tk.Label(top_frame, text="Adres (.onion):", font=custom_font, bg="#2b2b2b", fg="#ffffff")
 address_label.pack(pady=5)
 
-address_frame = tk.Frame(top_frame, bg="#3c3f41", padx=2, pady=2, relief=tk.GROOVE, bd=2)
-address_frame.pack(pady=5, padx=10, fill=tk.X)
-
 address_entry = tk.Entry(top_frame, font=custom_font, bg="#3d3b3b", fg="#ffffff", relief=tk.FLAT)
 address_entry.insert(0, "Generowanie...")
-address_entry.config(state='readonly')
-address_entry.config(state=tk.NORMAL)
 address_entry.pack(pady=5, padx=10, fill=tk.X)
 
 # KEY
 key_label = tk.Label(top_frame, text="Klucz szyfrowania (base64):", font=custom_font, bg="#2b2b2b", fg="#ffffff")
 key_label.pack(pady=5)
 
-key_frame = tk.Frame(top_frame, bg="#3c3f41", padx=2, pady=2, relief=tk.GROOVE, bd=2)
-key_frame.pack(pady=5, padx=10, fill=tk.X)
-
 key_entry = tk.Entry(top_frame, font=custom_font, bg="#3d3b3b", fg="#ffffff", relief=tk.FLAT)
 key_entry.insert(0, "Generowanie...")
-key_entry.config(state='readonly')
-key_entry.config(state=tk.NORMAL)
 key_entry.pack(pady=5, padx=10, fill=tk.X)
 
 # RECEIVED TEXTS
@@ -112,8 +112,8 @@ send_button = tk.Button(bottom_frame, text="Wyślij", command=send_response, fon
                         fg="#ffffff")
 send_button.pack(side=tk.RIGHT, padx=10, pady=6)
 
-#####
 server_thread = threading.Thread(target=start_server, args=(address_entry, key_entry, received_messages_text))
+server_thread.daemon = True
 server_thread.start()
 
 root.mainloop()

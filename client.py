@@ -97,3 +97,5 @@ message_entry.pack(side=tk.LEFT, padx=10, pady=5, fill=tk.X, expand=True)
 
 send_button = tk.Button(bottom_frame, text="Wyślij", command=send_message, font=custom_font, bg="#2b2b2b", fg="#ffffff")
 send_button.pack(side=tk.RIGHT, padx=10, pady=6)
+
+root.mainloop()
